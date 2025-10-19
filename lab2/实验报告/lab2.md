@@ -1,7 +1,5 @@
 # 实验二：物理内存管理 实验报告
 
-
-
 ---
 
 ## 一、 实验目的与内容摘要
@@ -9,14 +7,15 @@
 本次实验的核心目标是深入理解并亲手实现操作系统的物理内存管理机制。在实验一构建的可启动内核基础上，本次实验为操作系统赋予了管理物理内存的核心能力，是构建现代操作系统内存管理体系的基石。
 
 实验内容主要包括：
-1.  **理解与实现连续物理内存分配算法**：
-    *   深入分析了实验框架中提供的 `First-Fit` (首次适应) 算法的实现原理。
-    *   动手编程实现了 `Best-Fit` (最佳适应) 算法，并通过了测试。
-2.  **理解分页机制与页表的初步建立**：
-    *   学习了 RISC-V SV39 分页机制，包括三级页表结构、页表项（PTE）格式以及 `satp` 寄存器的作用。
-    *   通过汇编代码在内核启动早期建立了初始页表，成功将内核映射到高地址虚拟空间，并开启了分页模式。
-3.  **挑战练习：实现高级内存分配算法**：
-    *   作为核心挑战，完整设计并实现了一个基于**完全二叉树**的**伙伴系统 (Buddy System)** 内存分配器以及slub分配器，并通过了全面的测试用例验证。
+
+1. **理解与实现连续物理内存分配算法**：
+   * 深入分析了实验框架中提供的 `First-Fit` (首次适应) 算法的实现原理。
+   * 动手编程实现了 `Best-Fit` (最佳适应) 算法，并通过了测试。
+2. **理解分页机制与页表的初步建立**：
+   * 学习了 RISC-V SV39 分页机制，包括三级页表结构、页表项（PTE）格式以及 `satp` 寄存器的作用。
+   * 通过汇编代码在内核启动早期建立了初始页表，成功将内核映射到高地址虚拟空间，并开启了分页模式。
+3. **挑战练习：实现高级内存分配算法**：
+   * 作为核心挑战，完整设计并实现了一个基于**完全二叉树**的**伙伴系统 (Buddy System)** 内存分配器以及slub分配器，并通过了全面的测试用例验证。
 
 通过本次实验，我掌握了从探测物理内存、建立管理结构，到实现多种分配算法，再到开启分页机制的全过程，对操作系统如何从零开始掌控计算机内存资源有了具体而深刻的认识。
 
@@ -24,12 +23,12 @@
 
 ### 2.1 实验知识点与OS原理的对应关系
 
-| 实验中的知识点                         | 对应的OS原理知识点                                    | 我的理解与分析                                               |
-| :------------------------------------- | :---------------------------------------------------- | :----------------------------------------------------------- |
-| `pmm_manager` 结构体                   | **物理内存管理器** (Physical Memory Manager)          | **含义**: 实验中的 `pmm_manager` 是一个通过函数指针定义的接口，统一了物理内存管理的操作规范（如 `init`, `alloc_pages`, `free_pages`）。OS原理中，物理内存管理器是内核中负责追踪和分配物理内存的抽象模块。<br>**关系**: `pmm_manager` 是OS原理中抽象概念的具体代码实现，体现了面向接口编程的思想，使得底层分配算法（FF, BF, Buddy）可以灵活替换。<br>**差异**: 理论侧重功能和目标（如效率、碎片管理），实验则关注如何用C语言的数据结构和函数指针优雅地实现一个可扩展、可替换的管理器框架。 |
-| `Page` 结构体, `free_area_t`           | **空闲空间管理** (位图法, 空闲链表法)                 | **含义**: 实验中使用 `Page` 结构体数组来描述所有物理页的状态，并用 `free_area_t`（内部是一个双向链表 `list_entry_t`）将所有空闲的内存块组织起来。<br>**关系**: 这是OS原理中**空闲链表法 (Free-List)** 的典型实现。`Page` 结构体中的 `property` 字段记录了连续空闲页的数量，`page_link` 则将这些空闲块的头页链接起来。<br>**差异**: 理论上会介绍位图法等多种方法。实验中选择了链表法，因为它在合并相邻空闲块时相对高效。实验代码通过精巧的 `le2page` 宏，实现了从链表节点指针到其宿主结构体指针的转换，这是内核编程中的一个常用技巧。 |
-| `First-Fit` / `Best-Fit` 算法          | **动态分区分配算法** (Dynamic Partition Allocation)   | **含义**: First-Fit从头查找第一个足够大的空闲块；Best-Fit遍历所有空闲块，找到大小最接近需求的那个。<br>**关系**: 实验代码 `default_pmm.c` 和我们实现的 `best_fit_pmm.c` 分别是这两种经典算法的直接代码翻译。其 `free_pages` 函数中的**合并（Coalescing）**逻辑也是理论的重点，即检查并合并前后相邻的空闲块以减少外部碎片。<br>**差异**: 理论分析常关注算法的时空复杂度和碎片化倾向。实验中，我们需要关注链表操作、边界条件和指针运算等具体实现细节。 |
-| `entry.S`中建立页表, `satp`寄存器, PTE | **分页内存管理** (Paging), **地址转换**, **多级页表** | **含义**: 实验中我们手动构建了一个三级页表，利用了1GiB大页映射特性，将高虚拟地址映射到物理地址。然后将页表基地址写入 `satp` 寄存器并刷新TLB，从而开启分页。<br>**关系**: 这完美复现了OS原理中启动分页机制的过程。它展示了从物理地址模式切换到虚拟地址模式的关键步骤，以及多级页表如何通过大页特性提高效率和节省页表空间。<br>**差异**: 理论上讲解地址翻译过程（VPN -> PPN），而实验则需要我们深入到汇编层面，直接操作 `satp` 等控制寄存器和使用 `sfence.vma` 等特权指令，让我们对硬件与软件的交互有了更深刻的体会。 |
+| 实验中的知识点                             | 对应的OS原理知识点                                                      | 我的理解与分析                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| :----------------------------------------- | :---------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pmm_manager` 结构体                     | **物理内存管理器** (Physical Memory Manager)                      | **含义**: 实验中的 `pmm_manager` 是一个通过函数指针定义的接口，统一了物理内存管理的操作规范（如 `init`, `alloc_pages`, `free_pages`）。OS原理中，物理内存管理器是内核中负责追踪和分配物理内存的抽象模块。`<br>`**关系**: `pmm_manager` 是OS原理中抽象概念的具体代码实现，体现了面向接口编程的思想，使得底层分配算法（FF, BF, Buddy）可以灵活替换。`<br>`**差异**: 理论侧重功能和目标（如效率、碎片管理），实验则关注如何用C语言的数据结构和函数指针优雅地实现一个可扩展、可替换的管理器框架。                                                      |
+| `Page` 结构体, `free_area_t`           | **空闲空间管理** (位图法, 空闲链表法)                             | **含义**: 实验中使用 `Page` 结构体数组来描述所有物理页的状态，并用 `free_area_t`（内部是一个双向链表 `list_entry_t`）将所有空闲的内存块组织起来。`<br>`**关系**: 这是OS原理中**空闲链表法 (Free-List)** 的典型实现。`Page` 结构体中的 `property` 字段记录了连续空闲页的数量，`page_link` 则将这些空闲块的头页链接起来。`<br>`**差异**: 理论上会介绍位图法等多种方法。实验中选择了链表法，因为它在合并相邻空闲块时相对高效。实验代码通过精巧的 `le2page` 宏，实现了从链表节点指针到其宿主结构体指针的转换，这是内核编程中的一个常用技巧。 |
+| `First-Fit` / `Best-Fit` 算法          | **动态分区分配算法** (Dynamic Partition Allocation)               | **含义**: First-Fit从头查找第一个足够大的空闲块；Best-Fit遍历所有空闲块，找到大小最接近需求的那个。`<br>`**关系**: 实验代码 `default_pmm.c` 和我们实现的 `best_fit_pmm.c` 分别是这两种经典算法的直接代码翻译。其 `free_pages` 函数中的**合并（Coalescing）**逻辑也是理论的重点，即检查并合并前后相邻的空闲块以减少外部碎片。`<br>`**差异**: 理论分析常关注算法的时空复杂度和碎片化倾向。实验中，我们需要关注链表操作、边界条件和指针运算等具体实现细节。                                                                                               |
+| `entry.S`中建立页表, `satp`寄存器, PTE | **分页内存管理** (Paging), **地址转换**, **多级页表** | **含义**: 实验中我们手动构建了一个三级页表，利用了1GiB大页映射特性，将高虚拟地址映射到物理地址。然后将页表基地址写入 `satp` 寄存器并刷新TLB，从而开启分页。`<br>`**关系**: 这完美复现了OS原理中启动分页机制的过程。它展示了从物理地址模式切换到虚拟地址模式的关键步骤，以及多级页表如何通过大页特性提高效率和节省页表空间。`<br>`**差异**: 理论上讲解地址翻译过程（VPN -> PPN），而实验则需要我们深入到汇编层面，直接操作 `satp` 等控制寄存器和使用 `sfence.vma` 等特权指令，让我们对硬件与软件的交互有了更深刻的体会。                                |
 
 ### 2.2 OS原理中重要但在实验中未体现的知识点
 
@@ -49,23 +48,24 @@
 - **`default_init()`**: 初始化内存管理器，将 `free_list` 初始化为空链表，空闲页计数器 `nr_free` 置零。
 - **`default_init_memmap(struct Page *base, size_t n)`**: 接收一块连续的物理内存区域（由 `base` 和 `n` 描述），将其作为一个大的空闲块加入到 `free_list` 中。它会设置头页 `base` 的 `property` 字段为块大小 `n`，并设置 `PG_property` 标志。插入时会保持链表的地址有序性。
 - **`default_alloc_pages(size_t n)`**:
-    1.  从 `free_list` 的头部开始**顺序遍历**。
-    2.  寻找**第一个**大小（`property`）不小于 `n` 的空闲块。
-    3.  找到后，如果块大小正好等于 `n`，则将其从链表中移除。
-    4.  如果块大小大于 `n`，则将其**分裂**：前 `n` 页分配出去，剩余部分形成一个新的、更小的空闲块，并放回链表。
-    5.  更新 `nr_free` 计数并返回分配到的 `Page` 指针。
+  1. 从 `free_list` 的头部开始**顺序遍历**。
+  2. 寻找**第一个**大小（`property`）不小于 `n` 的空闲块。
+  3. 找到后，如果块大小正好等于 `n`，则将其从链表中移除。
+  4. 如果块大小大于 `n`，则将其**分裂**：前 `n` 页分配出去，剩余部分形成一个新的、更小的空闲块，并放回链表。
+  5. 更新 `nr_free` 计数并返回分配到的 `Page` 指针。
 - **`default_free_pages(struct Page *base, size_t n)`**:
-    1.  将被释放的 `n` 页内存标记为一个新的空闲块。
-    2.  将其按地址顺序插入回 `free_list`。
-    3.  **合并**: 检查新插入块的**前一个**和**后一个**节点。如果它们在物理上是相邻的，则将它们合并成一个更大的空闲块，以减少外部碎片。
+  1. 将被释放的 `n` 页内存标记为一个新的空闲块。
+  2. 将其按地址顺序插入回 `free_list`。
+  3. **合并**: 检查新插入块的**前一个**和**后一个**节点。如果它们在物理上是相邻的，则将它们合并成一个更大的空闲块，以减少外部碎片。
 
 #### 问题回答
 
 - **你的 first fit 算法是否有进一步的改进空间？**
-  
-    是的，有改进空间：
-    1.  **性能**: 每次分配都从头搜索，可能导致低地址区积累大量小碎片，降低后续分配效率。可改进为 **Next-Fit**，从上次分配结束的位置开始搜索，使碎片分布更均匀。
-    2.  **数据结构**: 对于大规模内存系统，单一链表效率不高。可以采用**隔离的空闲链表 (Segregated Free Lists)**，为不同大小范围的块维护不同的链表，从而缩小搜索范围，加快分配速度。
+
+  是的，有改进空间：
+
+  1. **性能**: 每次分配都从头搜索，可能导致低地址区积累大量小碎片，降低后续分配效率。可改进为 **Next-Fit**，从上次分配结束的位置开始搜索，使碎片分布更均匀。
+  2. **数据结构**: 对于大规模内存系统，单一链表效率不高。可以采用**隔离的空闲链表 (Segregated Free Lists)**，为不同大小范围的块维护不同的链表，从而缩小搜索范围，加快分配速度。
 
 ### 练习2：实现 Best-Fit 连续物理内存分配算法
 
@@ -74,24 +74,185 @@
 `Best-Fit` 算法的核心思想是选择一个能满足需求且大小最接近的空闲块，以期保留大的空闲块用于满足未来的大内存请求。
 
 我的实现基于 `default_pmm.c`，主要修改了 `alloc_pages` 函数：
-1.  **复制与重命名**: 复制 `default_pmm.c` 为 `best_fit_pmm.c`，并修改相应的文件和变量名。在 `pmm.c` 中将 `pmm_manager` 指向新的 `best_fit_pmm_manager`。
-2.  **修改 `best_fit_alloc_pages(size_t n)`**:
-    *   与 `First-Fit` 不同，该函数需要**遍历整个 `free_list`**，而不是找到第一个就停止。
-    *   在遍历过程中，使用一个变量 `best_page` 记录当前找到的最小的、但仍能满足 `n` 的空闲块。
-    *   遍历结束后，`best_page` 中存储的就是“最佳”选择。
-    *   后续的**分裂**和**返回**逻辑与 `First-Fit` 完全相同。
-3.  **释放与合并**: 释放内存的 `best_fit_free_pages` 函数与 `default_free_pages` 的逻辑完全一样，因为它处理的是通用的、按地址排序的链表，合并逻辑与分配策略无关。
+
+1. **复制与重命名**: 复制 `default_pmm.c` 为 `best_fit_pmm.c`，并修改相应的文件和变量名。在 `pmm.c` 中将 `pmm_manager` 指向新的 `best_fit_pmm_manager`。
+2. **修改 `best_fit_alloc_pages(size_t n)`**:
+   * 与 `First-Fit` 不同，该函数需要**遍历整个 `free_list`**，而不是找到第一个就停止。
+   * 在遍历过程中，使用一个变量 `best_page` 记录当前找到的最小的、但仍能满足 `n` 的空闲块。
+   * 遍历结束后，`best_page` 中存储的就是“最佳”选择。
+   * 后续的**分裂**和**返回**逻辑与 `First-Fit` 完全相同。
+3. **释放与合并**: 释放内存的 `best_fit_free_pages` 函数与 `default_free_pages` 的逻辑完全一样，因为它处理的是通用的、按地址排序的链表，合并逻辑与分配策略无关。
+
+### 第一处修改：在 `best_fit_init_memmap`函数中的页框初始化部分
+
+```
+p->flags = 0;
+set_page_ref(p, 0);
+```
+
+**变量说明：**
+
+* `p`：指向当前正在初始化的页框结构体的指针
+* `p->flags`：页框的状态标志位，设为0表示清除所有标志
+* `set_page_ref(p, 0)`：将页框的引用计数设为0，表示该页框当前未被使用
+
+### 第二处修改：在 `best_fit_init_memmap`函数中的链表插入部分
+
+```
+ while ((le = list_next(le)) != &free_list) {
+            struct Page* page = le2page(le, page_link);
+            /*LAB2 EXERCISE 2: YOUR CODE*/ 
+            // 编写代码
+            // 1、当base < page时，找到第一个大于base的页，将base插入到它前面，并退出循环
+            // 2、当list_next(le) == &free_list时，若已经到达链表结尾，将base插入到链表尾部
+            if(base < page){
+                list_add_before(le, &(base->page_link));
+              return;
+            }
+        }
+         // 如果循环结束还没找到位置，说明要插入到末尾
+    list_add_before(&free_list, &(base->page_link));
+```
+
+**变量说明：**
+
+* `base`：要插入的空闲块的起始页框
+* `page`：链表中当前检查的页框
+* `le`：链表节点的指针，用于遍历
+* `list_add_before`：在指定节点前插入新节点
+* `list_add`：在指定节点后插入新节点
+
+### 第三处修改：在 `best_fit_alloc_pages`函数中的最佳适应算法实现
+
+```
+ /*LAB2 EXERCISE 2: YOUR CODE*/ 
+    // 下面的代码是first-fit的部分代码，请修改下面的代码改为best-fit
+    // 遍历空闲链表，查找满足需求的空闲页框
+    // 如果找到满足需求的页面，记录该页面以及当前找到的最小连续空闲页框数量
+
+    while ((le = list_next(le)) != &free_list) {
+        struct Page *p = le2page(le, page_link);
+        if (p->property >= n && p->property < min_size) {
+            min_size = p->property;
+            page = p;
+        }
+    }
+
+    if (page != NULL) {
+        list_entry_t* prev = list_prev(&(page->page_link));
+        list_del(&(page->page_link));
+        if (page->property > n) {
+            struct Page *p = page + n;
+            p->property = page->property - n;
+            SetPageProperty(p);
+            list_add_before(list_next(prev), &(p->page_link));
+        }
+        nr_free -= n;
+        ClearPageProperty(page);
+    }
+    //有可能没有分配
+    return page;
+```
+
+* `le`：链表遍历指针
+* `p`：当前检查的页框
+* `p->property`：当前空闲块的大小（页数）
+* `n`：请求分配的页数
+* `min_size`：记录找到的最小满足条件的块的大小
+* `page`：指向最终选中的最合适的页框
+
+### 第四处修改：在 `best_fit_free_pages`函数中的页块属性设置
+
+```
+  /*LAB2 EXERCISE 2: YOUR CODE*/ 
+    // 编写代码
+    // 具体来说就是设置当前页块的属性为释放的页块数、并将当前页块标记为已分配状态、最后增加nr_free的值
+    ClearPageProperty(base);  // 先清除
+    base->property = n;
+    SetPageProperty(base);
+    nr_free += n;
+
+    if (list_empty(&free_list)) {
+        list_add(&free_list, &(base->page_link));
+    } else {
+        list_entry_t* le = &free_list;
+        while ((le = list_next(le)) != &free_list) {
+            struct Page* page = le2page(le, page_link);
+            if (base < page) {
+                list_add_before(le, &(base->page_link));
+                break;
+            } 
+        }
+         // 如果循环结束还没break，说明要插入到末尾
+        if (le == &free_list) {
+            list_add_before(&free_list, &(base->page_link));
+        }
+    }
+```
+
+**变量说明：**
+
+* `base`：要释放的页块的起始页框
+* `base->property`：设置该页块的大小为n
+* `SetPageProperty(base)`：标记该页为空闲块的起始页
+* `nr_free`：系统空闲页总数，增加n
+
+### 第五处修改：在 `best_fit_free_pages`函数中的向前合并部分
+
+```
+if (le != &free_list) {
+        p = le2page(le, page_link);
+        /*LAB2 EXERCISE 2: YOUR CODE*/ 
+        // 编写代码
+        // 1、判断前面的空闲页块是否与当前页块是连续的，如果是连续的，则将当前页块合并到前面的空闲页块中
+        // 2、首先更新前一个空闲页块的大小，加上当前页块的大小
+        // 3、清除当前页块的属性标记，表示不再是空闲页块
+        // 4、从链表中删除当前页块
+        // 5、将指针指向前一个空闲页块，以便继续检查合并后的连续空闲页块
+
+        if (p+p->property == base) {
+            p->property += base->property;
+            ClearPageProperty(base);
+            list_del(&(base->page_link));
+            base = p;
+        }
+    }
+    le = list_next(&(base->page_link));
+    if (le != &free_list) {
+        p = le2page(le, page_link);
+        if (base + base->property == p) {
+            base->property += p->property;
+            ClearPageProperty(p);
+            list_del(&(p->page_link));
+        }
+    }
+```
+
+**变量说明：**
+
+* `p`：前一个空闲块的起始页
+* `p->property`：前一个空闲块的大小
+* `base`：当前要释放的页块
+* `p + p->property == base`：检查两个块是否物理连续
+* `ClearPageProperty(base)`：清除base的空闲块起始标记
+* `list_del`：从链表中删除base节点
+
+### 验证结果
+
+![7b2354ed98b6dcee7df6cede63a899d7](./fig/7b2354ed98b6dcee7df6cede63a899d7.jpg)
 
 #### 问题回答
 
 - **你的 Best-Fit 算法是否有进一步的改进空间？**
 
-    是的，有改进空间：
-    1.  **性能开销**: 最大的缺点是性能。为了找到“最佳”块，它必须遍历整个空闲链表，时间复杂度为 O(N)，比 First-Fit 慢。
-    2.  **碎片问题**: Best-Fit 容易产生大量微小的、难以再利用的外部碎片。因为它总是留下最小的残余，这些小碎片很难被合并或分配。
-    3.  **改进方向**:
-        *   **优化数据结构**: 使用**平衡二叉搜索树**或**跳表**按块大小来组织空闲块，可以将查找最佳块的时间复杂度从 O(N) 优化到 O(logN)。
-        *   **伙伴系统**: 采用伙伴系统这种更高级的算法，它在合并时效率极高，并能更好地控制碎片。
+  是的，有改进空间：
+
+  1. **性能开销**: 最大的缺点是性能。为了找到“最佳”块，它必须遍历整个空闲链表，时间复杂度为 O(N)，比 First-Fit 慢。
+  2. **碎片问题**: Best-Fit 容易产生大量微小的、难以再利用的外部碎片。因为它总是留下最小的残余，这些小碎片很难被合并或分配。
+  3. **改进方向**:
+     * **优化数据结构**: 使用**平衡二叉搜索树**或**跳表**按块大小来组织空闲块，可以将查找最佳块的时间复杂度从 O(N) 优化到 O(logN)。
+     * **伙伴系统**: 采用伙伴系统这种更高级的算法，它在合并时效率极高，并能更好地控制碎片。
+
 
 ## 四、 扩展练习 Challenge
 
@@ -106,6 +267,7 @@
 本次挑战练习旨在 ucore 操作系统内核中，实现一个经典且高效的伙伴系统（Buddy System）物理内存管理器。为了追求算法的简洁性与高效性，本次实现严格遵循了参考资料中的设计思想，采用**完全二叉树（Complete Binary Tree）**作为核心数据结构来对物理内存进行追踪和管理。
 
 该设计的主要目标包括：
+
 - 提供快速的内存分配与回收能力，确保相关操作的时间复杂度为 O(logN)。
 - 通过最佳适配（Best-Fit）的策略有效控制外部碎片。
 - 实现一个符合 `pmm_manager` 接口规范、可无缝集成到 ucore 内核的伙伴分配器。
@@ -115,11 +277,11 @@
 本实现将一块连续的、大小调整为2的幂次的物理内存区域视为一个整体，并通过一个数组模拟的完全二叉树对其进行分级管理。这种方法与传统的基于空闲链表（Free Lists）的实现有本质区别。
 
 - **树形结构**: 整个管理区域由一棵完全二叉树进行映射。树的根节点代表整个内存区域。每个父节点所代表的内存块被精确地对半分割，由其左右子节点分别代表。因此，树的每一层都对应着特定大小（2的幂次）的内存块，从顶层的整个区域大小，到底层代表单个物理页的叶子节点。
-
 - **状态表示**: 本设计的精髓在于节点值的含义。我们不使用传统的“空闲/占用”状态机来标记每个节点，而是让树的每个节点 `tree[i]` 存储一个**数值**，该数值代表此节点所管辖的内存区域中，**当前可用的最大连续空闲块的大小**。
-    - 若一个节点代表的区域**完全空闲**，其值为该区域的总大小。
-    - 若一个区域被**部分或完全分配**，其值为其左右子节点值中的**较大者**（`MAX(left, right)`）。
-    - 若一个叶子节点代表的块被分配，其值为 `0`。
+
+  - 若一个节点代表的区域**完全空闲**，其值为该区域的总大小。
+  - 若一个区域被**部分或完全分配**，其值为其左右子节点值中的**较大者**（`MAX(left, right)`）。
+  - 若一个叶子节点代表的块被分配，其值为 `0`。
 
 这种将状态与可用空间大小合二为一的设计，极大地简化了搜索和合并的逻辑判断。
 
@@ -136,6 +298,7 @@ typedef struct {
 
 static buddy_system_t buddy;
 ```
+
 - `buddy.tree`: 这是实现的核心。它是一个 `unsigned` 类型的数组，在逻辑上构成一棵完全二叉树。数组的大小为 `2 * buddy.size - 1`。
 - `buddy.size`: 伙伴系统实际管理的物理页面总数。这个数值**必须是2的幂**，通过对 `pmm_init` 传入的可用页面总数 `n` 进行一系列计算（减去元数据占用后，再向下取整）得到。
 - `buddy.page_base`: `pmm_init` 传入的可用 `Page` 结构体数组，在划拨出一段内存用于存储 `buddy.tree` 之后，剩余部分的起始指针。所有分配操作返回的 `Page*` 都基于此基地址和计算出的偏移量 `offset` 得到。
@@ -151,34 +314,32 @@ static buddy_system_t buddy;
 ##### 4. 关键算法实现
 
 - **初始化 (`buddy_init_memmap`)**:
-    
-    初始化是整个系统能否正确工作的关键。它分为以下几个步骤：
-    
-    1.  **自举分配 (Bootstrapping)**: `init_memmap` 接收到 `base`（可用 `Page` 数组的开头）和 `n`（可用页面数）后，首先要为自己的核心数据结构 `buddy.tree` 分配内存。我们采取“就地取材”的策略，将 `base` 指向的**物理内存区域**的前几页征用为 `buddy.tree` 的存储空间。通过 `page2pa` 和 `va_pa_offset` 进行正确的地址转换，得到 `buddy.tree` 的内核虚拟地址。
-    2.  **计算管理范围**: 从总可用页数 `n` 中减去用于元数据的页数，得到真正可供分配的页数。然后，对这个数字**向下取整**到最接近的2的幂，得到最终的 `buddy.size`。这样做确保了二叉树能够完美地映射所管理的内存区域。
-    3.  **初始化二叉树**: 遍历 `buddy.tree` 数组，为每个节点赋初值。节点 `i` 的初始值为它所能代表的最大内存块的大小。这通过一个简单的循环实现，逐层将块大小减半，从而构建出一个表示完全空闲状态的树。
-    4.  **标记元数据页**: 将被 `buddy.tree` 占用的物理页对应的 `Page` 结构体标记为 `Reserved`，防止它们被错误地分配。
-    
+
+  初始化是整个系统能否正确工作的关键。它分为以下几个步骤：
+
+  1. **自举分配 (Bootstrapping)**: `init_memmap` 接收到 `base`（可用 `Page` 数组的开头）和 `n`（可用页面数）后，首先要为自己的核心数据结构 `buddy.tree` 分配内存。我们采取“就地取材”的策略，将 `base` 指向的**物理内存区域**的前几页征用为 `buddy.tree` 的存储空间。通过 `page2pa` 和 `va_pa_offset` 进行正确的地址转换，得到 `buddy.tree` 的内核虚拟地址。
+  2. **计算管理范围**: 从总可用页数 `n` 中减去用于元数据的页数，得到真正可供分配的页数。然后，对这个数字**向下取整**到最接近的2的幂，得到最终的 `buddy.size`。这样做确保了二叉树能够完美地映射所管理的内存区域。
+  3. **初始化二叉树**: 遍历 `buddy.tree` 数组，为每个节点赋初值。节点 `i` 的初始值为它所能代表的最大内存块的大小。这通过一个简单的循环实现，逐层将块大小减半，从而构建出一个表示完全空闲状态的树。
+  4. **标记元数据页**: 将被 `buddy.tree` 占用的物理页对应的 `Page` 结构体标记为 `Reserved`，防止它们被错误地分配。
 - **内存分配 (`buddy_alloc_pages`)**:
-    
-    分配过程是一个从树根到叶子的**深度优先搜索**，以寻找最佳适配的内存块：
-    
-    1.  **大小对齐**: 将用户请求的页面数 `n` 向上取整到最接近的2的幂 `req_size`。
-    2.  **搜索**: 从根节点（`index = 0`）开始：
-        a. 检查当前节点的 `tree[index]` 是否小于 `req_size`。如果是，则此路不通。
-        b. 只要当前节点代表的块 `node_size` 大于 `req_size`，就继续向下分裂。
-        c. 优先检查左子节点 `LEFT_LEAF(index)` 的值是否满足 `req_size`。如果满足，则搜索路径转向左子树 (`index = LEFT_LEAF(index)`)。
-        d. 否则，转向右子树。
-    3.  **标记与更新**: 找到大小刚好为 `req_size` 的节点后，将其值 `tree[index]` 设为 `0`，表示该块已被分配。然后，从该节点开始**向上回溯**至根节点，更新路径上所有父节点的值为 `MAX(left_child_value, right_child_value)`。
-    4.  **地址转换**: 将找到的节点索引 `index` 转换为相对于 `buddy.page_base` 的页面偏移量 `offset`，并返回 `buddy.page_base + offset`。
-    
+
+  分配过程是一个从树根到叶子的**深度优先搜索**，以寻找最佳适配的内存块：
+
+  1. **大小对齐**: 将用户请求的页面数 `n` 向上取整到最接近的2的幂 `req_size`。
+  2. **搜索**: 从根节点（`index = 0`）开始：
+     a. 检查当前节点的 `tree[index]` 是否小于 `req_size`。如果是，则此路不通。
+     b. 只要当前节点代表的块 `node_size` 大于 `req_size`，就继续向下分裂。
+     c. 优先检查左子节点 `LEFT_LEAF(index)` 的值是否满足 `req_size`。如果满足，则搜索路径转向左子树 (`index = LEFT_LEAF(index)`)。
+     d. 否则，转向右子树。
+  3. **标记与更新**: 找到大小刚好为 `req_size` 的节点后，将其值 `tree[index]` 设为 `0`，表示该块已被分配。然后，从该节点开始**向上回溯**至根节点，更新路径上所有父节点的值为 `MAX(left_child_value, right_child_value)`。
+  4. **地址转换**: 将找到的节点索引 `index` 转换为相对于 `buddy.page_base` 的页面偏移量 `offset`，并返回 `buddy.page_base + offset`。
 - **内存释放 (`buddy_free_pages`)**:
-    
-    释放过程是一个从叶子到树根的**回溯与合并**过程：
-    
-    1.  **定位**: 根据待释放的 `Page*` 指针计算出页面偏移量 `offset`。再根据 `offset` 和释放的大小 `n`（同样需对齐到2的幂），计算出它在二叉树中对应的节点索引 `index`。
-    2.  **恢复**: 找到对应的节点后（此时其值应为0），将其值恢复为它所代表的块的大小。
-    3.  **合并**: 从该节点开始**向上回溯**。在每个父节点，检查其左右子节点的值。如果 `left_value + right_value == parent_node_size`，这说明两个子块（即一对伙伴）都已完全空闲，可以合并。此时，将父节点的值也恢复为它所代表的完整块大小。此合并过程递归进行，直到无法合并或到达根节点。如果不能合并，则父节点的值更新为 `MAX(left_value, right_value)`。
+
+  释放过程是一个从叶子到树根的**回溯与合并**过程：
+
+  1. **定位**: 根据待释放的 `Page*` 指针计算出页面偏移量 `offset`。再根据 `offset` 和释放的大小 `n`（同样需对齐到2的幂），计算出它在二叉树中对应的节点索引 `index`。
+  2. **恢复**: 找到对应的节点后（此时其值应为0），将其值恢复为它所代表的块的大小。
+  3. **合并**: 从该节点开始**向上回溯**。在每个父节点，检查其左右子节点的值。如果 `left_value + right_value == parent_node_size`，这说明两个子块（即一对伙伴）都已完全空闲，可以合并。此时，将父节点的值也恢复为它所代表的完整块大小。此合并过程递归进行，直到无法合并或到达根节点。如果不能合并，则父节点的值更新为 `MAX(left_value, right_value)`。
 
 ##### 5. 代码集成与运行步骤
 
@@ -186,18 +347,18 @@ static buddy_system_t buddy;
 
 **第一步：创建源文件**
 
-1.  在 `kern/mm/` 目录下，创建一个新的头文件 `buddy_pmm.h`，用于声明我们的 `pmm_manager` 实例。
-2.  在 `kern/mm/` 目录下，创建 `buddy_pmm.c` 文件，并将本次挑战练习中完成的、基于二叉树的完整伙伴系统代码粘贴进去。
+1. 在 `kern/mm/` 目录下，创建一个新的头文件 `buddy_pmm.h`，用于声明我们的 `pmm_manager` 实例。
+2. 在 `kern/mm/` 目录下，创建 `buddy_pmm.c` 文件，并将本次挑战练习中完成的、基于二叉树的完整伙伴系统代码粘贴进去。
 
 **第二步：修改 `pmm.c` 以启用伙伴系统**
 
-1.  **包含头文件**: 在 `kern/mm/pmm.c` 文件的顶部，添加 `#include <buddy_pmm.h>` 并 `extern` 声明 `buddy_pmm_manager`。
-2.  **切换管理器**: 修改 `init_pmm_manager` 函数，将全局的 `pmm_manager` 指针指向 `buddy_pmm_manager`。
+1. **包含头文件**: 在 `kern/mm/pmm.c` 文件的顶部，添加 `#include <buddy_pmm.h>` 并 `extern` 声明 `buddy_pmm_manager`。
+2. **切换管理器**: 修改 `init_pmm_manager` 函数，将全局的 `pmm_manager` 指针指向 `buddy_pmm_manager`。
 
 **第三步：编译与测试**
 
-1.  **彻底清理**: 在项目根目录下，运行 `make clean` 命令。
-2.  **编译并运行**: 执行 `make qemu` 命令。
+1. **彻底清理**: 在项目根目录下，运行 `make clean` 命令。
+2. **编译并运行**: 执行 `make qemu` 命令。
 
 ##### 6. 测试用例 (`buddy_check`) 设计与结果分析
 
@@ -207,9 +368,9 @@ static buddy_system_t buddy;
 
 测试的主要目标覆盖了伙伴系统的三大核心机制：
 
-1.  **正确的分裂（Splitting）**: 验证当请求一个小内存块时，系统能否从一个大的空闲块中正确地、递归地分裂出所需大小的块，并总是从最低的可用地址开始。
-2.  **正确的合并（Coalescing）**: 验证当一对相邻的、互为伙伴的内存块都被释放时，系统能否自动地将它们合并成一个更大的空闲块。
-3.  **状态一致性（State Consistency）**: 验证在经过一系列复杂的分配和释放操作后，系统能否准确追踪内存状态，没有发生内存泄漏或状态错乱。
+1. **正确的分裂（Splitting）**: 验证当请求一个小内存块时，系统能否从一个大的空闲块中正确地、递归地分裂出所需大小的块，并总是从最低的可用地址开始。
+2. **正确的合并（Coalescing）**: 验证当一对相邻的、互为伙伴的内存块都被释放时，系统能否自动地将它们合并成一个更大的空闲块。
+3. **状态一致性（State Consistency）**: 验证在经过一系列复杂的分配和释放操作后，系统能否准确追踪内存状态，没有发生内存泄漏或状态错乱。
 
 ##### A.2 `buddy_check()` 关键测试步骤详解
 
@@ -223,12 +384,10 @@ static buddy_system_t buddy;
   struct Page *p1 = alloc_pages(1);
   struct Page *p2 = alloc_pages(1);
   ```
-
 * **目的**: 这是对伙伴系统最基本、最核心行为的测试。在一个刚刚初始化、拥有一整块连续空闲内存的系统上：
 
-  1.  第一次请求分配1页 (`p1`)，系统必须从代表所有内存的根节点开始，一路分裂下来，直到产生一个1页的块。根据伙伴算法的规则，这个块的地址必须是最低的，即索引为 `0`。
-  2.  第二次请求分配1页 (`p2`)，此时系统应该分配 `p1` 的伙伴，即索引为 `1` 的页。
-
+  1. 第一次请求分配1页 (`p1`)，系统必须从代表所有内存的根节点开始，一路分裂下来，直到产生一个1页的块。根据伙伴算法的规则，这个块的地址必须是最低的，即索引为 `0`。
+  2. 第二次请求分配1页 (`p2`)，此时系统应该分配 `p1` 的伙伴，即索引为 `1` 的页。
 * **验证**:
 
   ```c
@@ -244,12 +403,10 @@ static buddy_system_t buddy;
   ```c
   struct Page *p3 = alloc_pages(3);
   ```
-
 * **目的**: 测试系统处理非2的幂次请求以及块对齐的能力。
 
-  1.  用户请求3页，伙伴系统必须将其**向上取整**到最近的2的幂，即4页。
-  2.  此时，索引为 `0` 和 `1` 的页已被占用。它们所在的 `[0-3]` 这个4页块已经不是完全空闲了。因此，系统必须找到下一个**4页对齐**的空闲地址。在伙伴系统中，一个大小为 2<sup>k</sup> 的块，其起始地址必须是 2<sup>k</sup> 的倍数。下一个4的倍数地址是索引 `4`。
-
+  1. 用户请求3页，伙伴系统必须将其**向上取整**到最近的2的幂，即4页。
+  2. 此时，索引为 `0` 和 `1` 的页已被占用。它们所在的 `[0-3]` 这个4页块已经不是完全空闲了。因此，系统必须找到下一个**4页对齐**的空闲地址。在伙伴系统中，一个大小为 2`<sup>`k`</sup>` 的块，其起始地址必须是 2`<sup>`k`</sup>` 的倍数。下一个4的倍数地址是索引 `4`。
 * **验证**:
 
   ```c
@@ -267,13 +424,11 @@ static buddy_system_t buddy;
   free_pages(p2, 1);
   p1 = alloc_pages(2);
   ```
-
 * **目的**: 这是对**合并机制**最直接的测试。
 
-  1.  首先释放 `p1`（索引0）。此时，其伙伴 `p2`（索引1）仍被占用，不应发生合并。
-  2.  接着释放 `p2`。现在，一对伙伴 `[0]` 和 `[1]` 都已空闲，`buddy_free_pages` 必须触发合并操作，将它们合并成一个大小为2页的块 `[0]`。
-  3.  为了验证合并是否真的发生了，我们立即尝试分配一个2页的块。如果合并成功，系统应该能立即找到并分配这个刚刚合并的块。
-
+  1. 首先释放 `p1`（索引0）。此时，其伙伴 `p2`（索引1）仍被占用，不应发生合并。
+  2. 接着释放 `p2`。现在，一对伙伴 `[0]` 和 `[1]` 都已空闲，`buddy_free_pages` 必须触发合并操作，将它们合并成一个大小为2页的块 `[0]`。
+  3. 为了验证合并是否真的发生了，我们立即尝试分配一个2页的块。如果合并成功，系统应该能立即找到并分配这个刚刚合并的块。
 * **验证**:
 
   ```c
@@ -293,13 +448,11 @@ static buddy_system_t buddy;
   size_t final_free = nr_free_pages();
   assert(final_free == buddy.size);
   ```
-
 * **目的**: 验证经过一系列分配和释放后，系统是否“物归原主”，没有造成内存泄漏。
 
-  1.  将测试过程中所有分配的内存块全部释放。
-  2.  调用 `nr_free_pages()`，在我们的二叉树实现中，它返回根节点 `tree[0]` 的值。
-  3.  如果所有的内存都已正确合并归还，根节点的值应该恢复为伙伴系统管理的总大小 `buddy.size`。
-
+  1. 将测试过程中所有分配的内存块全部释放。
+  2. 调用 `nr_free_pages()`，在我们的二叉树实现中，它返回根节点 `tree[0]` 的值。
+  3. 如果所有的内存都已正确合并归还，根节点的值应该恢复为伙伴系统管理的总大小 `buddy.size`。
 * **验证**:
   `assert(final_free == buddy.size);`
   这个最终断言是整个测试的收官之笔。它的通过，标志着整个伙伴系统的分配和回收循环是闭合的、无损的，内存管理状态保持了最终的一致性。
@@ -338,16 +491,16 @@ SLUB分配器通过预分配"slab"（内存页），在每个slab中划分相同
 #### 设计思路
 
 **设计目标**
-   *  实现基于页的物理内存管理（第一层）
-   *  实现基于对象的SLUB分配器（第二层）
-   *  支持任意大小的内存分配请求
-   *  提供高效的对象缓存和重用机制
-   *  实现完整的内存分配、释放和管理功能
 
+* 实现基于页的物理内存管理（第一层）
+* 实现基于对象的SLUB分配器（第二层）
+* 支持任意大小的内存分配请求
+* 提供高效的对象缓存和重用机制
+* 实现完整的内存分配、释放和管理功能
 
 **核心数据结构：**
 
-1.  slab结构 (slab_t) 
+1. slab结构 (slab_t)
 
 ```
 typedef struct slab_s {
@@ -361,15 +514,12 @@ typedef struct slab_s {
 ```
 
 **设计说明**
-  * slab_link：用于将相同状态的slab连接成链表
 
-  * freelist：采用嵌入式链表，在空闲对象内部存储next指针
-
-  * inuse/total：实时跟踪slab使用状态，用于状态迁移决策
-
-  * cache：反向引用，便于对象释放时快速定位所属缓存
-
-  * page：维护与物理页的映射关系
+* slab_link：用于将相同状态的slab连接成链表
+* freelist：采用嵌入式链表，在空闲对象内部存储next指针
+* inuse/total：实时跟踪slab使用状态，用于状态迁移决策
+* cache：反向引用，便于对象释放时快速定位所属缓存
+* page：维护与物理页的映射关系
 
 2. 缓存结构 (kmem_cache_t)
 
@@ -379,55 +529,56 @@ typedef struct kmem_cache_s {
     size_t obj_size;             // 对象标准大小
     size_t actual_size;          // 实际分配大小（对齐后）
     unsigned int objs_per_slab;  // 每slab对象数量
-    
+  
     // 三状态slab链表
     list_entry_t slabs_full;     // 完全使用的slab
     list_entry_t slabs_partial;  // 部分使用的slab  
     list_entry_t slabs_free;     // 完全空闲的slab
-    
+  
     // 统计信息
     unsigned long num_slabs;     // 总slab数量
     unsigned long num_objects;   // 总对象数量
     unsigned long num_free;      // 空闲对象数量
 } kmem_cache_t;
 ```
-**设计说明**
-  * 三链表设计：将slab按使用状态分类，优化分配性能
-  * 统计信息：便于监控和调试，了解缓存使用情况
-  * 大小信息：actual_size考虑对齐要求，objs_per_slab动态计算
 
+**设计说明**
+
+* 三链表设计：将slab按使用状态分类，优化分配性能
+* 统计信息：便于监控和调试，了解缓存使用情况
+* 大小信息：actual_size考虑对齐要求，objs_per_slab动态计算
 
 **核心算法实现：**
 
-1.  SLUB管理器初始化
+1. SLUB管理器初始化
 
-``` static void slub_init(void) {
+```static
     list_init(&free_list);
     nr_free = 0;
-    
+  
     size_t sizes[SLUB_CACHE_NUM] = {16, 32, 64, 128, 256, 512, 1024, 2048};
     const char *names[SLUB_CACHE_NUM] = {
         "slub-16", "slub-32", "slub-64", "slub-128",
         "slub-256", "slub-512", "slub-1024", "slub-2048"
     };
-    
+  
     for (int i = 0; i < SLUB_CACHE_NUM; i++) {
         slub_caches[i].name = names[i];
         slub_caches[i].obj_size = sizes[i];
         slub_caches[i].actual_size = sizes[i];
-        
+      
         // 计算每个slab的对象容量
         size_t slab_usable = PGSIZE - sizeof(slab_t);
         slub_caches[i].objs_per_slab = slab_usable / sizes[i];
         if (slub_caches[i].objs_per_slab == 0) {
             slub_caches[i].objs_per_slab = 1;
         }
-        
+      
         // 初始化三状态链表
         list_init(&slub_caches[i].slabs_full);
         list_init(&slub_caches[i].slabs_partial);
         list_init(&slub_caches[i].slabs_free);
-        
+      
         // 重置统计信息
         slub_caches[i].num_slabs = 0;
         slub_caches[i].num_objects = 0;
@@ -439,29 +590,25 @@ typedef struct kmem_cache_s {
 
 **初始化流程：**
 
-  * 初始化全局空闲页链表
-
-  * 设置8种不同大小的对象缓存
-
-  * 计算每个slab能容纳的对象数量
-
-  * 初始化三状态slab链表
-
-  * 重置所有统计计数器
+* 初始化全局空闲页链表
+* 设置8种不同大小的对象缓存
+* 计算每个slab能容纳的对象数量
+* 初始化三状态slab链表
+* 重置所有统计计数器
 
 2. 页分配算法（第一层）
 
 ```
 static struct Page *slub_alloc_pages(size_t n) {
     assert(n > 0);
-    
+  
     if (n > nr_free) {
         return NULL;
     }
-    
+  
     struct Page *page = NULL;
     list_entry_t *le = &free_list;
-    
+  
     // First-fit策略查找
     while ((le = list_next(le)) != &free_list) {
         struct Page *p = le2page(le, page_link);
@@ -470,11 +617,11 @@ static struct Page *slub_alloc_pages(size_t n) {
             break;
         }
     }
-    
+  
     if (page != NULL) {
         // 从空闲链表移除
         list_del(&(page->page_link));
-        
+      
         // 内存块分割
         if (page->property > n) {
             struct Page *p = page + n;
@@ -482,26 +629,23 @@ static struct Page *slub_alloc_pages(size_t n) {
             SetPageProperty(p);
             list_add(&free_list, &(p->page_link));
         }
-        
+      
         nr_free -= n;
         ClearPageProperty(page);
     }
-    
+  
     return page;
 }
 ```
 
 **算法特点**
 
-  * 使用first-fit分配策略
+* 使用first-fit分配策略
+* 支持内存块分割
+* 维护空闲页计数
+* 返回物理页指针
 
-  * 支持内存块分割
-
-  * 维护空闲页计数
-
-  * 返回物理页指针
-
-3.  对象分配算法（第二层）
+3. 对象分配算法（第二层）
 
 ```
 void* slub_alloc_obj(size_t size) {
@@ -511,12 +655,12 @@ void* slub_alloc_obj(size_t size) {
         struct Page *page = slub_alloc_pages(pages_needed);
         return page ? page2kva(page) : NULL;
     }
-    
+  
     // 选择合适缓存
     int index = slub_size_index(size);
     kmem_cache_t *cache = &slub_caches[index];
     slab_t *slab = NULL;
-    
+  
     // 三级分配策略
     if (!list_empty(&cache->slabs_partial)) {
         // 1. 优先使用部分分配的slab
@@ -532,49 +676,46 @@ void* slub_alloc_obj(size_t size) {
         slab = slub_alloc_slab(cache);
         if (slab) list_add(&slab->slab_link, &cache->slabs_partial);
     }
-    
+  
     if (!slab || !slab->freelist) return NULL;
-    
+  
     // 从freelist分配对象
     void *obj = slab->freelist;
     slab->freelist = *(void**)obj;  // 更新freelist
     slab->inuse++;
     cache->num_free--;
-    
+  
     // 更新slab状态
     update_slab_state(slab, cache);
-    
+  
     return obj;
 }
 ```
 
 **算法解释：**
 
-  * 部分使用slab优先：最大化利用已有资源
+* 部分使用slab优先：最大化利用已有资源
+* 空闲slab次之：避免频繁创建新slab
+* 新slab最后：按需扩展内存资源
+* 状态自动更新：分配后重新分类slab
 
-  * 空闲slab次之：避免频繁创建新slab
+4. 对象释放算法：
 
-  * 新slab最后：按需扩展内存资源
-
-  * 状态自动更新：分配后重新分类slab
-
-4.  对象释放算法：
-
-``` 
+```
 void slub_free_obj(void *obj) {
     if (!obj) return;
-    
+  
     // 找到对象所属slab
     struct Page *page = kva2page(obj);
     slab_t *slab = (slab_t*)page2kva(page);
     kmem_cache_t *cache = slab->cache;
-    
+  
     // 将对象放回freelist
     *(void**)obj = slab->freelist;
     slab->freelist = obj;
     slab->inuse--;
     cache->num_free++;
-    
+  
     // 更新slab状态
     update_slab_state(slab, cache);
 }
@@ -582,14 +723,10 @@ void slub_free_obj(void *obj) {
 
 **释放流程：**
 
-
-  * 地址转换找到对应slab
-
-  * 对象插入freelist头部
-
-  * 更新使用计数
-
-  * 重新分类slab状态
+* 地址转换找到对应slab
+* 对象插入freelist头部
+* 更新使用计数
+* 重新分类slab状态
 
 5. slab创建算法
 
@@ -598,18 +735,18 @@ static slab_t* slub_alloc_slab(kmem_cache_t *cache) {
     // 分配物理页
     struct Page *page = slub_alloc_pages(1);
     if (!page) return NULL;
-    
+  
     // 初始化slab结构
     slab_t *slab = (slab_t*)page2kva(page);
     slab->cache = cache;
     slab->total = cache->objs_per_slab;
     slab->inuse = 0;
     slab->page = page;
-    
+  
     // 构建freelist链表
     void *objects = (void*)slab + sizeof(slab_t);
     slab->freelist = objects;
-    
+  
     void *current = objects;
     for (unsigned int i = 0; i < slab->total - 1; i++) {
         void *next = (char*)current + cache->actual_size;
@@ -617,30 +754,29 @@ static slab_t* slub_alloc_slab(kmem_cache_t *cache) {
         current = next;
     }
     *(void**)current = NULL;  // 链表结束
-    
+  
     // 更新统计信息
     cache->num_slabs++;
     cache->num_objects += slab->total;
     cache->num_free += slab->total;
-    
+  
     return slab;
 }
 ```
 
 **slab初始化**
-  * 在页开头存放slab元数据
 
-  * 剩余空间划分为等大小对象
+* 在页开头存放slab元数据
+* 剩余空间划分为等大小对象
+* 使用嵌入式指针构建freelist
+* 更新缓存统计信息
 
-  * 使用嵌入式指针构建freelist
+6. 状态管理算法
 
-  * 更新缓存统计信息
-
-6.  状态管理算法
 ```
 static void update_slab_state(slab_t *slab, kmem_cache_t *cache) {
     list_del(&slab->slab_link);
-    
+  
     if (slab->inuse == 0) {
         // 完全空闲 → 移到free链表
         list_add(&slab->slab_link, &cache->slabs_free);
@@ -653,6 +789,7 @@ static void update_slab_state(slab_t *slab, kmem_cache_t *cache) {
     }
 }
 ```
+
 inuse == 0	，变为free状态，说明所有对象释放
 
 inuse == total，变为full状态，说明所有对象分配
@@ -661,7 +798,7 @@ inuse == total，变为full状态，说明所有对象分配
 
 #### 具体测试用例
 
-1.  基本功能测试：
+1. 基本功能测试：
 
 ```
 void test_basic_allocation() {
@@ -677,7 +814,7 @@ void test_basic_allocation() {
 }
 ```
 
-2.  对象重用测试:
+2. 对象重用测试:
 
 ```
 void test_object_reuse() {
@@ -691,7 +828,7 @@ void test_object_reuse() {
             cprintf("  分配对象 %d 失败\n", i);
         }
     }
-    
+  
     // 释放部分对象
     for (int i = 0; i < 3; i++) {
         if (objs[i]) {
@@ -699,7 +836,7 @@ void test_object_reuse() {
             cprintf("  成功释放对象 %d\n", i);
         }
     }
-    
+  
     // 重新分配，测试重用
     for (int i = 0; i < 2; i++) {
         void *new_obj = slub_alloc_obj(64);
@@ -721,7 +858,7 @@ void test_boundary_cases() {
     void *small = slub_alloc_obj(16);
     void *medium = slub_alloc_obj(128);
     void *large = slub_alloc_obj(512);
-    
+  
     if (small && medium && large) {
         cprintf("   成功分配不同大小对象\n");
         slub_free_obj(small);
@@ -731,7 +868,7 @@ void test_boundary_cases() {
     } else {
         cprintf("   不同大小分配测试失败\n");
     }
-    
+  
     cprintf("\n--- 测试 4: 大对象分配测试 ---\n");
     void *huge = slub_alloc_obj(4096);
     if (huge) {
@@ -741,9 +878,10 @@ void test_boundary_cases() {
     } else {
         cprintf("  大对象分配测试失败\n");
     }
-    
+  
 }
 ```
+
 #### 实验思考
 
 以上是理论上的slub算法实现，可以满足slub算法的要求，但是我在实现测试的过程中经常出现卡死的情况，有时在slab创建时卡住，在链表操作时卡住，分配对象时卡住，释放对象时卡住，而且修改时总是出现新的问题，通过AI进行修改时，AI给出的解决方法都是对源代码进行简化，移除复杂的链表操作，简化对象管理（每个slab只包含一个对象）等操作来完成测试。
@@ -759,19 +897,17 @@ void test_boundary_cases() {
 改代码测试后结果如下所示：
 ![图二](图二.png)
 
-
-
 ### 扩展练习 Challenge：硬件可用物理内存范围的获取方法（思考）
 
 如果操作系统无法从 Bootloader (如通过 DTB 或 E820) 提前获知可用物理内存范围，它必须自己探测。这是一个危险但理论上可行的过程：
 
-1.  **标准化接口查询 (首选)**: 尝试调用固件提供的标准接口。例如，在 x86 架构下，可以尝试通过 BIOS `INT 15h, EAX=E820h` 中断来获取内存映射表 (Memory Map)。
-2.  **暴力探测 (危险)**:
-    *   **原理**: 从一个较低的物理地址（如 0）开始，以页为单位，向一个地址写入一个独特的“魔法值”（如 `0xDEADBEEF`），然后立即读回。如果读回的值与写入的相同，则可以**猜测**该地址存在可用的 RAM。
-    *   **风险**:
-        *   **MMIO (Memory-Mapped I/O)**: 许多物理地址被映射到硬件设备寄存器。向这些地址写入可能导致设备状态改变，甚至系统崩溃。
-        *   **ROM/Flash**: 写入只读内存会失败。
-        *   **内存空洞**: 访问不存在的物理地址可能会导致总线错误（Bus Error）异常。
-    *   **缓解措施**: 在进行探测前，必须设置一个**异常处理程序 (Trap Handler)**。当访问非法地址导致异常时，处理程序捕获异常，将该地址范围标记为不可用，然后恢复执行，继续探测下一个地址。这个过程非常缓慢且复杂，是万不得已的最后手段。
+1. **标准化接口查询 (首选)**: 尝试调用固件提供的标准接口。例如，在 x86 架构下，可以尝试通过 BIOS `INT 15h, EAX=E820h` 中断来获取内存映射表 (Memory Map)。
+2. **暴力探测 (危险)**:
+   * **原理**: 从一个较低的物理地址（如 0）开始，以页为单位，向一个地址写入一个独特的“魔法值”（如 `0xDEADBEEF`），然后立即读回。如果读回的值与写入的相同，则可以**猜测**该地址存在可用的 RAM。
+   * **风险**:
+     * **MMIO (Memory-Mapped I/O)**: 许多物理地址被映射到硬件设备寄存器。向这些地址写入可能导致设备状态改变，甚至系统崩溃。
+     * **ROM/Flash**: 写入只读内存会失败。
+     * **内存空洞**: 访问不存在的物理地址可能会导致总线错误（Bus Error）异常。
+   * **缓解措施**: 在进行探测前，必须设置一个**异常处理程序 (Trap Handler)**。当访问非法地址导致异常时，处理程序捕获异常，将该地址范围标记为不可用，然后恢复执行，继续探测下一个地址。这个过程非常缓慢且复杂，是万不得已的最后手段。
 
 在现代规范化的系统中（如实验使用的RISC-V + OpenSBI），依赖 Bootloader 传递的 DTB 是最标准、最安全的方法。
