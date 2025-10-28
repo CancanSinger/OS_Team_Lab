@@ -18,6 +18,7 @@ static void print_ticks() {
     panic("EOT: kernel seems ok.");
 #endif
 }
+static int num = 0;
 
 /* idt_init - initialize IDT to each of the entry points in kern/trap/vectors.S
  */
@@ -130,6 +131,17 @@ void interrupt_handler(struct trapframe *tf) {
              *(3)当计数器加到100的时候，我们会输出一个`100ticks`表示我们触发了100次时钟中断，同时打印次数（num）加一
             * (4)判断打印次数，当打印次数为10时，调用<sbi.h>中的关机函数关机
             */
+        /*===========================================================*/
+           clock_set_next_event();
+           ticks++;
+           if (ticks % 100 == 0) {
+                print_ticks();
+                num++;
+               if (num == 10) {
+                   sbi_shutdown();
+               }
+           }
+         /*===========================================================*/
             break;
         case IRQ_H_TIMER:
             cprintf("Hypervisor software interrupt\n");
@@ -168,6 +180,10 @@ void exception_handler(struct trapframe *tf) {
              *(2)输出异常指令地址
              *(3)更新 tf->epc寄存器
             */
+            cprintf("Illegal instruction\n");
+            cprintf("Exception code: 0x%08x\n", tf->epc);
+            tf->epc += 4;  // 跳过当前异常指令，继续执行下一条指令
+         
             break;
         case CAUSE_BREAKPOINT:
             //断点异常处理
@@ -176,6 +192,9 @@ void exception_handler(struct trapframe *tf) {
              *(2)输出异常指令地址
              *(3)更新 tf->epc寄存器
             */
+            cprintf("Breakpoint\n");
+            cprintf("Exception code: 0x%08x\n", tf->epc);
+            tf->epc += 4;  // 跳过当前断点指令，继续执行下一条指令
             break;
         case CAUSE_MISALIGNED_LOAD:
             break;
