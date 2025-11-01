@@ -16,7 +16,7 @@
    * 描述ucore中处理中断异常的流程。
 3. **理解上下文切换机制**：
    * 理解trapentry.s中的重要汇编代码的作用
-4. **完善异常中断**
+4. **完善异常中断**:
    * 编程完善在触发一条非法指令异常和断点异常，在 kern/trap/trap.c的异常处理函数中捕获，并对其进行处理，简单输出异常类型和异常指令触发地址
 
 通过本次实验，我们通过实际编程实现中断与异常处理了深入理解操作系统底层运行机制，掌握了中断处理这一操作系统核心功能，为后续的进程管理、内存管理等实验打下坚实基础。
@@ -50,7 +50,7 @@
 在 kern/trap/trap.c 的 interrupt_handler 函数中，我完成了对时钟中断的处理
 
 
-、、、
+```
 case IRQ_S_TIMER:
     clock_set_next_event();  // (1)设置下次时钟中断
     ticks++;                 // (2)计数器加一
@@ -63,7 +63,7 @@ case IRQ_S_TIMER:
     }
     break;
 
-、、、
+```
 
 
 #### 定时器中断处理流程
@@ -123,10 +123,11 @@ case IRQ_S_TIMER:
 
 这两条指令实现了以下操作：
 
-、、、
+```
 csrw sscratch, sp      ; 将当前sp保存到sscratch寄存器
 csrrw s0, sscratch, x0 ; 将sscratch的值读入s0，同时将sscratch清零
-、、、
+```
+
 
 目的如下：
 
@@ -150,7 +151,7 @@ csrrw s0, sscratch, x0 ; 将sscratch的值读入s0，同时将sscratch清零
 
 在 `exception_handler` 函数中添加了对非法指令和断点异常的处理：
 
-、、、
+```
 case CAUSE_ILLEGAL_INSTRUCTION:
     cprintf("Illegal instruction caught at 0x%08x\n", tf->epc);
     cprintf("Exception type: Illegal instruction\n");
@@ -163,14 +164,14 @@ case CAUSE_BREAKPOINT:
     tf->epc += 4;  // 跳过当前断点指令
     break;
 
-、、、
+```
 
 
 #### 异常触发方法
 
 在 `interrupt_handler` 的时钟中断处理中触发异常测试：
 
-、、、
+```
 if (ticks == 10 && test_phase == 0) {
     test_phase = 1;
     cprintf("=== Challenge3 Test: Breakpoint ===\n");
@@ -181,7 +182,7 @@ else if (ticks == 20 && test_phase == 1) {
     cprintf("=== Challenge3 Test: Illegal Instruction ===\n");
     asm volatile(".word 0x00000000");
 }
-、、、
+```
 
 
 #### 运行结果
